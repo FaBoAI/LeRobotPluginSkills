@@ -12,6 +12,7 @@ JetsonにUSB(ワイヤレスドングル)で接続したジョイスティック
 # 実装前に必ず参照する
 
 - 実装知見(座標系・キャリブレーション・落とし穴の詳細): `./reference/reference.md`
+- **対応ジョイスティックのデバイス別特性(軸配置・レンジ・癖)**: `./reference/reference_devices.md`
 - LeRobotプラグイン規約・ソース該当箇所・デバイス情報: `./reference/reference_URL.md`
 
 # 前提知識(コード生成前に必ず理解すること)
@@ -28,6 +29,11 @@ JetsonにUSB(ワイヤレスドングル)で接続したジョイスティック
 4. **プラグイン規約**: パッケージ名は `lerobot_teleoperator_` プレフィックス必須、
    `XxxConfig`→`Xxx` の命名、`__init__.py` で両クラスを re-export、
    `@TeleoperatorConfig.register_subclass("type名")` で登録。
+5. **デバイス非依存の入力設計**: ジョイスティックは機種で軸配置もレンジも異なる
+   (例: F710はスティック±32767・右スティックABS_RX/RY、ELECOMは0..255・右スティックABS_Z/RZ)。
+   機種ごとの**プロファイル**(意味チャンネル→evdevコードの対応表)を定義し、
+   **USB vendor/product id で接続中のパッドを自動識別**する。スティックの正規化は
+   固定値ではなく各軸の absinfo(min/max)基準で行う。詳細は `reference_devices.md`。
 
 # ワークフロー
 
@@ -35,13 +41,13 @@ JetsonにUSB(ワイヤレスドングル)で接続したジョイスティック
 
 - evdev で認識確認(pygame不要。ヘッドレスJetsonで動作):
   `python3 -c "import evdev; [print(p, evdev.InputDevice(p).name) for p in evdev.list_devices()]"`
-- F710 は **XInputモード(前面スイッチ「X」)** で使う。usb id `046d:c21f`・名前
-  "Logitech Gamepad F710"。DirectInputモード(`046d:c219`)を検出したら
-  スイッチを「X」にするよう明示エラーで案内する。
-- 認識されない場合: Logitechボタンで電源オン、ドングル挿し直し、
+- 表示された USB vendor/product id を `reference_devices.md` の対応表と照合し、
+  どのプロファイルに該当するかを確認する(未対応のパッドなら同ファイルの
+  「新しいパッドを対応させる手順」に従いプロファイルを追加する)。
+- モード切替スイッチのあるパッド(F710のX/D等)は、対応プロファイルのモードに
+  合わせる。誤ったモードは別デバイスとして見えるため、検出時に明示エラーで案内する。
+- 認識されない場合: パッドの電源オン、ドングル挿し直し、
   `sudo usermod -aG input $USER` + 再ログイン(/dev/input/event* の権限)。
-- ジョイスティックの軸レンジ・ボタンは機種やモードで異なるため、接続時に
-  `capabilities()`/`absinfo()` で実際の値を収集して正規化する。
 
 ## Step 2: ロボットアームSO-101疎通確認
 
@@ -70,22 +76,37 @@ JetsonにUSB(ワイヤレスドングル)で接続したジョイスティック
 
 ## Step 4: キー割当・コード生成
 
-実証済みのキー割当(F710 XInputモード):
+実証済みのキー割当(**意味チャンネル**で定義。各チャンネルがどの evdev 軸/ボタンに
+対応するかは機種プロファイル依存 — `reference_devices.md` を参照):
 
-| 入力 | 割当 |
+| 操作チャンネル | 割当 |
 |------|------|
-| 左スティック 左/右 (ABS_X)  | shoulder_pan |
-| 左スティック 上/下 (ABS_Y)  | shoulder_lift(上=正、軸は上下反転して扱う)|
-| 右スティック 上/下 (ABS_RY) | elbow_flex(上=正)|
-| 十字キー 上/下 (ABS_HAT0Y)  | wrist_flex(上=正)|
-| 右スティック 左/右 (ABS_RX) | wrist_roll |
-| LT (ABS_Z)                  | グリッパを開く |
-| RT (ABS_RZ)                 | グリッパを閉じる |
-| Y / A / X ボタン            | エピソード成功 / 失敗 / 再記録(get_teleop_events)|
-| RB(押しっぱなし)           | 人間介入フラグ |
-| Ctrl+C                      | 終了(lerobot-teleoperate が KeyboardInterrupt を処理)|
+| 左スティック 左/右 (left_x)  | shoulder_pan |
+| 左スティック 上/下 (left_y)  | shoulder_lift(上=正になるよう軸を反転)|
+| 右スティック 上/下 (right_y) | elbow_flex(上=正)|
+| 十字キー 上/下 (dpad_y)      | wrist_flex(上=正)|
+| 右スティック 左/右 (right_x) | wrist_roll |
+| グリッパ開/閉ボタン          | グリッパ操作(アナログ軸 or デジタルボタン、割当は機種プロファイル依存)|
+| イベントボタン×3             | エピソード成功 / 失敗 / 再記録(get_teleop_events、割当は機種プロファイル依存)|
+| 介入ボタン(押しっぱなし)    | 人間介入フラグ(同上)|
+| Ctrl+C                       | 終了(lerobot-teleoperate が KeyboardInterrupt を処理)|
 
 制御方式: スティック入力を速度として関節目標位置に**積分**する(長押しで連続動作)。
+
+プロファイル実装の要点:
+- 意味チャンネル(left_x〜dpad_y、グリッパ開/閉)→ evdevコードの対応表を機種ごとに定義し、
+  USB vendor/product id で自動選択。手動指定(`profile` 設定)も可能にする。
+- スティック正規化は各軸の absinfo から `(raw − center)/half` で行う
+  (±32767系と0..255系の両方に対応)。
+- **接続直後の absinfo.value を信用しない**(0..255系パッドは中央でも0を返すことがある)。
+  スティック/ハットはセンター値、アナログトリガーは min でシードする。
+- グリッパトリガーはアナログ軸(0..1)とデジタルボタン(0/1)の両方式に対応する。
+- グリッパ・イベント用の**ボタン割当もプロファイルに含める**(同じevdevコードでも機種によって
+  物理位置が全く異なる。例: BTN_TL2はF710では存在しないがELECOMではスティック押し込み)。
+- **サーボゲインのオプトイン上書き機構を持たせる**: LeRobot 0.6.0 は接続のたびに
+  P_Coefficient=16(工場出荷値32の半分)を書き込むためアームが非力になりがち。
+  lerobotソースは改変せず、テレオペ設定のパース時に `SOFollower.configure` をラップして
+  純正処理の直後にゲインを上書きする(詳細: reference.md §7.5)。
 
 ### 実装上の制約(ハマりやすい点。必ず守ること)
 
@@ -129,17 +150,21 @@ lerobot-teleoperate \
     --robot.max_relative_target=5 \
     --teleop.type=<type名> \
     --teleop.id=default \
-    --teleop.robot_calibration_file=$HOME/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json
+    --teleop.robot_calibration_file=$HOME/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json \
+    --teleop.robot_gains='{"p_coefficient": 32}'
 ```
 
 - `robot_calibration_file` で関節ごとのリミットを自動導出(度数モードでの安全確保に必須)。
+- `robot_gains` でサーボPゲインを工場出荷値(32)に戻す(LeRobotデフォルトの16では
+  アームが非力。関節が唸る/発振する場合は24程度に下げる)。
 - 起動が確認できたら「動作確認してください」とユーザーに明示する。
 
 ## Step 6: 動作確認
 
 - 最初は低速(`--teleop.speed_scale=0.5` 程度)で全関節の方向・可動範囲を確認。
 - 確認観点: 各関節が端(リミット)で**止まる**こと(反対側へ巻き戻らないこと)/
-  スティックを離すとその場で保持すること / グリッパの開閉方向 / 体感速度のバランス。
+  スティックを離すとその場で保持すること / グリッパの開閉方向 / 体感速度のバランス /
+  **保持力・剛性**(重力で垂れる・押し負ける場合は `robot_gains` のPを上げる)。
 - 速度調整: `--teleop.speed_scale=` で全体、`--teleop.joint_speeds='{"elbow_flex": 50.0}'` で個別。
 - 終了は Ctrl+C。
 

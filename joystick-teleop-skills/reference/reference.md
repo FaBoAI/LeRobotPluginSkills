@@ -1,7 +1,9 @@
 # LeRobot 0.6.0 ジョイスティック・テレオペレータープラグイン実装知見
 
-Logitech F710 + SO-101 フォロワー + Jetson (JetPack/L4T) での実機構築(2026-07-30〜31)で得た知見。
-実装の実例: `lerobot_teleoperator_f710`(evdevバックエンド、pytest 32件、実機検証済み)。
+Logitech F710 / ELECOM JC-U3912T + SO-101 フォロワー + Jetson (JetPack/L4T) での実機構築
+(2026-07-30〜31)で得た知見。
+実装の実例: `lerobot_teleoperator_f710`(evdevバックエンド、機種プロファイル自動識別、
+pytest 40件、実機検証済み)。機種別の軸配置・レンジ・癖は `reference_devices.md` を参照。
 
 ---
 
@@ -80,23 +82,26 @@ Logitech F710 + SO-101 フォロワー + Jetson (JetPack/L4T) での実機構築
   (`ensure_safe_goal_position` は正規化空間で present±max_diff にクリップするため、
   ラップ実装とは根本的に両立しない、という理由もある)。
 
-## 6. F710 / evdev 実装の要点
+## 6. ジョイスティック / evdev 実装の要点(機種非依存)
 
 - Jetson では **evdev 一択**(pygame/SDL 不要、ヘッドレスOK。pygame は未インストールが普通)。
-- F710 は前面スイッチでモードが変わり、**別デバイスとして見える**:
-  - X(XInput、推奨): usb id `046d:c21f`、名前 "Logitech Gamepad F710"、kernel `xpad`。
-    軸: 左スティック `ABS_X/ABS_Y`、右スティック `ABS_RX/ABS_RY`(-32768..32767、上=負)、
-    トリガー `ABS_Z`(LT)/`ABS_RZ`(RT)(0..255)、十字キー `ABS_HAT0X/Y`(±1、上=-1)。
-    ボタン: `BTN_A/B/X/Y`, `BTN_TL/TR`, `BTN_SELECT/START/MODE`, `BTN_THUMBL/R`。
-  - D(DirectInput): `046d:c219`、名前 "Cordless RumblePad 2"。**右スティックが ABS_Z/ABS_RZ に
-    変わる**など軸配置が別物。X モード前提のコードは D モード検出時に明示エラーで案内すること。
-- 電源が入っていないと `/dev/input/event*` に現れない(Logitech ボタンで起床)。
-  `evdev.list_devices()` を vendor/product で走査して自動検出。
+- **機種プロファイル + USB id 自動識別**: 機種で軸配置(右スティックが ABS_RX/RY か
+  ABS_Z/RZ か)もレンジ(±32767 か 0..255 か)もトリガー方式(アナログ軸かデジタルボタンか)も
+  異なる。意味チャンネル(left_x/left_y/right_x/right_y/dpad_x/dpad_y + グリッパ開/閉)→
+  evdevコードの対応表を機種ごとに定義し、`evdev.list_devices()` を走査して
+  vendor/product id で自動選択する。機種別の実測値は `reference_devices.md` に集約。
+- **スティック正規化は absinfo 基準**: `(raw − center)/half`(center=(min+max)/2)。
+  固定の 32767 割りでは 0..255 系パッドが動かない。
+- **接続直後の absinfo.value を信用しない**: 0..255 系のHIDパッドは中央静止でも value=0 を
+  返すことがあり、そのままシードすると「左上全開」の誤入力になる。スティック/ハットは
+  センター値、アナログトリガーは min でシードし、最初のイベント以降に実値を使う。
+- 電源が入っていないと `/dev/input/event*` に現れない(スリープするパッドはボタンで起床)。
 - 権限: `/dev/input/event*` は `input` グループ。`sudo usermod -aG input $USER` + 再ログイン。
 - 読み取りは非ブロッキングで毎フレームドレイン:
   `os.set_blocking(dev.fd, False)` + `read_one()` ループ + `BlockingIOError` 捕捉。
-  接続時に `absinfo()` と `active_keys()` で初期状態をシードする。
+  接続時に `active_keys()` でボタン初期状態をシードする。
 - デッドゾーンは再スケール式(`sign×(|v|−dz)/(1−dz)`)にすると出だしが滑らか。
+  カーネルの flat 値(例: ELECOM は 15/127.5≈0.12)を覆う程度に設定(0.15 目安)。
 - 無線切断(`OSError`)時は**最終指令位置を保持**(ゼロ指令や例外での急停止より安全)。
 - 積分制御の dt は上限を設ける(例 0.1s)。ループが一瞬止まっても目標がジャンプしない。
 - `connect()` では **reader の生成→start() 成功後に self へ代入**。失敗時に半接続状態が残ると
@@ -120,6 +125,24 @@ Logitech F710 + SO-101 フォロワー + Jetson (JetPack/L4T) での実機構築
 - 速度は「単位/秒」で定義し、グローバル倍率(`speed_scale`)を持たせると CLI から一発調整できる。
   **SO-101 では elbow_flex が同一指令速度でも体感的に速い**ため、デフォルトを他の 70% 程度に
   下げるとバランスが良い(実機フィードバックより)。
+
+## 7.5 アームのパワーが足りないとき(サーボゲイン)【実機検証済み 2026-07-31】
+
+- LeRobot 0.6.0 の `so_follower.configure()` は**接続のたびに全モーターへ P_Coefficient=16 を
+  書き込む**(サーボ工場出荷値は32。震え防止のため半減されている)。これがアームの保持力・
+  追従力が弱い主因になる。I=0、D=32 はデフォルト通り。
+- 対処(lerobotソースは改変しない): テレオペプラグイン側で `SOFollower.configure` を
+  **ランタイムでラップ**し、純正configure完了直後に指定ゲインを上書きする
+  (実装例: `lerobot_teleoperator_f710/robot_gains.py`)。フックは設定パース時
+  (`__post_init__`)に導入するため、同一プロセス内で robot.connect() より必ず先に入る。
+  使い方: `--teleop.robot_gains='{"p_coefficient": 32}'`(teleoperate / record 両対応、
+  オプトイン、未指定なら無介入)。**32で関節が唸る/発振する場合は 24 程度に下げる**。
+- **グリッパは意図的に弱い**: `configure()` が Max_Torque_Limit=500(50%)、
+  Protection_Current=250、Overload_Torque=25% を書き込む(モーター焼損防止)。
+  掴む力を上げたい場合はここを緩めることになるが、連続把持での過熱・焼損リスクと引き換え。
+- ハード要因も確認: フォロワーの電源は 12V・5A 以上の専用ACアダプタ推奨
+  (供給不足は低トルク・シリアル不安定の両方を招く)。
+- 追加フィールドはデータセット互換チェック(`robot_type`/`fps`/`features` のみ比較)に影響しない。
 
 ## 8. 運用ノウハウ(Jetson / シリアル)
 
