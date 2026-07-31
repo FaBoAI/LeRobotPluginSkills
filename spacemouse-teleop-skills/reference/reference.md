@@ -1,7 +1,7 @@
 # LeRobot 0.6.0 SpaceMouseテレオペレータープラグイン実装知見
 
 SpaceMouse Compact + SO-101 フォロワー + Jetson での実機構築(2026-07-31)で得た知見。
-実装の実例: `lerobot_teleoperator_spacemouse`(evdev、pytest 19件、実機検証済み)。
+実装の実例: `lerobot_teleoperator_spacemouse`(evdev、pytest 22件、実機検証済み)。
 プラグイン規約・座標系・キャリブレーション・サーボゲイン等の共通知見は
 `../../joystick-teleop-skills/reference/reference.md` を参照(重複記載しない)。
 
@@ -19,7 +19,12 @@ SpaceMouse Compact + SO-101 フォロワー + Jetson での実機構築(2026-07-
   `hold_timeout`(既定0.1秒)以内に新着イベントが無ければ0を返す。
   - 操作中は60Hzで更新されるため誤失効しない(イベント間隔≈16ms << 100ms)。
   - 実機検証: 強くひねった状態から手を離し、最終2秒間の目標値ドリフト**全関節0.0°**。
-  - タイムアウトを大きくしすぎない(0.2秒超でリリース応答が鈍る=危険側)。
+  - タイムアウトを大きくしすぎない(0.2秒超でリリース応答が鈍る=危険側。設定上限0.3秒)。
+- **タイムスタンプはカーネル時刻を使う**: ドレイン時刻でスタンプすると、制御ループが
+  停滞した際にバッファ内の古いイベント(最終変位を含む)が「新鮮」として付け直され、
+  再開後に最大 `(MAX_DT + hold_timeout) × 速度` のファントム動作が出る。
+  `EVIOCSCLOCKID` ioctl(`_IOW('E',0xa0,int)` = 0x400445A0)で CLOCK_MONOTONIC を設定し、
+  `event.timestamp()` を `time.monotonic()` と直接比較する(旧カーネルはフォールバック)。
 
 ## 2. デバイス特性(SpaceMouse Compact実測)
 
@@ -31,6 +36,9 @@ SpaceMouse Compact + SO-101 フォロワー + Jetson での実機構築(2026-07-
 - ボタンは2個のみ(BTN_0/BTN_1)。グリッパ開/閉に使うと、エピソードイベント用の
   ボタンは残らない — `get_teleop_events` は全False固定にし、`lerobot-record` の
   キーボード操作(→/←/ESC)で代替する設計が妥当。
+- **SYN_DROPPED(カーネルバッファ溢れ)でボタンのリリースを取りこぼす**と、グリッパが
+  クランプ端まで動き続ける。SYN_DROPPED受信時はボタン状態を `active_keys()` で再同期し、
+  軸キャッシュはクリアする(変位中なら約16msで再ストリームされる)。
 - LED(EV_LED)を1個持つが未使用。
 
 ## 3. 制御設計
