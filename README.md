@@ -31,6 +31,14 @@ LeRobotプラグイン開発のための **Agent Skills** です。
 |---|---|---|
 | 3Dconnexion SpaceMouse Compact | USB `256f:c635` | リリース時ゼロイベントなし→ホールドタイムアウトで暴走防止。ボタン2個はグリッパ開/閉 |
 
+### [quest-teleop-skills](./quest-teleop-skills/) — Meta Quest(VR / WebXR)
+
+コントローラ6DoFポーズによる**絶対位置IK制御**(手の動きにグリッパが1:1追従)。ヘッドセットへのインストール不要(WebXR+内蔵HTTPSサーバ)。
+
+| 対応機種 | 識別 | 備考 |
+|---|---|---|
+| Meta Quest 3 | WebXR(同一WiFi) | パススルーで実機を見ながら操作。クラッチ式(グリップ=原点)、IKはURDF実寸・placo不要。joint_offsets_deg較正手順あり |
+
 ## 各スキルの構成
 
 ```
