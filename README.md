@@ -23,6 +23,14 @@ LeRobotプラグイン開発のための **Agent Skills** です。
 |---|---|---|
 | SMC-Mixer | ALSAカード名 `SINCO` | Mackie Control方式(フェーダー=PitchBend)。Masterポート(サブデバイス1)使用 |
 
+### [spacemouse-teleop-skills](./spacemouse-teleop-skills/) — SpaceMouse(6自由度)
+
+6DoFパックの変位を関節速度として積分する**6軸同時**の速度制御。
+
+| 対応機種 | 識別 | 備考 |
+|---|---|---|
+| 3Dconnexion SpaceMouse Compact | USB `256f:c635` | リリース時ゼロイベントなし→ホールドタイムアウトで暴走防止。ボタン2個はグリッパ開/閉 |
+
 ## 各スキルの構成
 
 ```
