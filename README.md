@@ -47,6 +47,14 @@ hololink 専用 venv のワーカープロセス + /dev/shm seqlock ブリッジ
 |---|---|---|
 | Leopard Imaging VB1940 Eagle | BOOTP (UDP 12267)、MAC `8c:1f:64` | 10GigE PoE 直結。2560×1984@30 実測 30.2fps。カメラは要冷却(発熱でリンク断)、復帰は mgbe down/up。`hololink.reset()` 禁止 |
 
+### [gemini305-camera-skills](./gemini305-camera-skills/) — Orbbec Gemini 305(USB ステレオデプス)
+
+pyorbbecsdk (Orbbec SDK v2) を LeRobot と同一プロセスで直接使う**デプス対応カメラプラグイン**(RealSenseCamera 互換 API、depth は `(H,W,1)` uint16 mm)。
+
+| 対応機種 | 識別 | 備考 |
+|---|---|---|
+| Orbbec Gemini 305 | USB `2bc5:0840` | 手首搭載向け超小型ステレオ。1280×800@30 color+depth 実測 30.3fps。1280×800/720 の 60fps は MJPG のみ(実測 60.3fps)、848×530 以下は無圧縮 60fps 可。udev ルール必須。PyPI は `pyorbbecsdk2` を使う(無印 `pyorbbecsdk` は v1 の罠)。デフォルトプロファイルは 848×530@30 |
+
 ## 各スキルの構成
 
 ```
@@ -62,7 +70,7 @@ hololink 専用 venv のワーカープロセス + /dev/shm seqlock ブリッジ
 
 - LeRobot **0.6.0**(サードパーティプラグイン規約準拠、`pip install -e .` で `--teleop.type=<name>` / `--robot.cameras` の `"type"` が使用可能に)
 - ロボットアーム: **SO-101** フォロワー
-- プラットフォーム: NVIDIA **Jetson Orin Nano**(テレオペ系、ヘッドレス、追加pip依存なしのevdev / ALSA raw MIDIバックエンド)/ NVIDIA **Jetson AGX Thor**(hsb-camera、JetPack 7 + Holoscan SDK 3.6 deb、Dockerレス)
+- プラットフォーム: NVIDIA **Jetson Orin Nano**(テレオペ系、ヘッドレス、追加pip依存なしのevdev / ALSA raw MIDIバックエンド)/ NVIDIA **Jetson AGX Thor**(hsb-camera、JetPack 7 + Holoscan SDK 3.6 deb、Dockerレス)/ NVIDIA **Jetson**(gemini305-camera、aarch64 + Python 3.13 conda、pyorbbecsdk2 ホイール)
 - いずれも実機で動作検証済み(可動域・イベントボタン・`lerobot-record` 互換 / カメラは実カメラ 30fps 連続取得)
 
 ## 新しいデバイスの追加
