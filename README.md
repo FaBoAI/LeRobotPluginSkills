@@ -2,7 +2,7 @@
 
 LeRobotプラグイン開発のための **Agent Skills** です。
 
-各種入力デバイスを [LeRobot](https://github.com/huggingface/lerobot) のテレオペレータープラグインとして対応させるための、コード生成ワークフロー・実装知見・デバイス実測データをスキル形式でまとめています。Claude Code などのコーディングエージェントに読み込ませて使います。
+各種入力デバイス・カメラを [LeRobot](https://github.com/huggingface/lerobot) のサードパーティプラグイン(テレオペレーター/カメラ)として対応させるための、コード生成ワークフロー・実装知見・デバイス実測データをスキル形式でまとめています。Claude Code などのコーディングエージェントに読み込ませて使います。
 
 ## スキル一覧
 
@@ -39,6 +39,14 @@ LeRobotプラグイン開発のための **Agent Skills** です。
 |---|---|---|
 | Meta Quest 3 | WebXR(同一WiFi) | パススルーで実機を見ながら操作。クラッチ式(グリップ=原点)、IKはURDF実寸・placo不要。joint_offsets_deg較正手順あり |
 
+### [hsb-camera-skills](./hsb-camera-skills/) — Holoscan Sensor Bridge カメラ(10GigE)
+
+hololink 専用 venv のワーカープロセス + /dev/shm seqlock ブリッジによる**プロセス分離型カメラプラグイン**(LeRobot 側の Python/numpy と衝突しない)。
+
+| 対応機種 | 識別 | 備考 |
+|---|---|---|
+| Leopard Imaging VB1940 Eagle | BOOTP (UDP 12267)、MAC `8c:1f:64` | 10GigE PoE 直結。2560×1984@30 実測 30.2fps。カメラは要冷却(発熱でリンク断)、復帰は mgbe down/up。`hololink.reset()` 禁止 |
+
 ## 各スキルの構成
 
 ```
@@ -52,10 +60,10 @@ LeRobotプラグイン開発のための **Agent Skills** です。
 
 ## 検証済み環境
 
-- LeRobot **0.6.0**(サードパーティプラグイン規約準拠、`pip install -e .` で `--teleop.type=<name>` が使用可能に)
+- LeRobot **0.6.0**(サードパーティプラグイン規約準拠、`pip install -e .` で `--teleop.type=<name>` / `--robot.cameras` の `"type"` が使用可能に)
 - ロボットアーム: **SO-101** フォロワー
-- プラットフォーム: NVIDIA **Jetson Orin Nano**(ヘッドレス、追加pip依存なしのevdev / ALSA raw MIDIバックエンド)
-- いずれも実機で動作検証済み(可動域・イベントボタン・`lerobot-record` 互換)
+- プラットフォーム: NVIDIA **Jetson Orin Nano**(テレオペ系、ヘッドレス、追加pip依存なしのevdev / ALSA raw MIDIバックエンド)/ NVIDIA **Jetson AGX Thor**(hsb-camera、JetPack 7 + Holoscan SDK 3.6 deb、Dockerレス)
+- いずれも実機で動作検証済み(可動域・イベントボタン・`lerobot-record` 互換 / カメラは実カメラ 30fps 連続取得)
 
 ## 新しいデバイスの追加
 

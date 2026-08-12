@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# LeRobot 0.6.0 のプラグイン発見はエントリポイントではなく、
+# 「lerobot_camera_ で始まる配布名を importlib.import_module する」方式。
+# したがって配布名 = トップレベルパッケージ名 (アンダースコア維持) が必須。
+name = "lerobot_camera_hsb"
+version = "0.1.0"
+description = "Holoscan Sensor Bridge (VB1940 Eagle 10GigE) camera plugin for LeRobot 0.6.x on Jetson AGX Thor"
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot>=0.6.0",
+    "numpy",
+]
+# 注意 (Jetson): 既存の CUDA torch/numpy スタックを守るため
+#   pip install -e . --no-deps
+# でインストールすること。
+
+[project.scripts]
+lerobot-hsb-monitor = "lerobot_camera_hsb.monitor:main"
+
+[tool.setuptools.packages.find]
+include = ["lerobot_camera_hsb*"]
