@@ -34,6 +34,8 @@ def main():
     parser.add_argument("--skip-setup-clock", action="store_true")
     parser.add_argument("--fail", action="store_true", help="接続失敗をシミュレート")
     parser.add_argument("--fps-override", type=float, default=None)
+    parser.add_argument("--out-width", type=int, default=None)
+    parser.add_argument("--out-height", type=int, default=None)
     args = parser.parse_args()
 
     if args.fail:
@@ -48,6 +50,8 @@ def main():
     signal.signal(signal.SIGINT, stop)
 
     w, h, fps = MODE_TABLE[args.camera_mode]
+    if args.out_width and args.out_height:
+        w, h = args.out_width, args.out_height  # 縮小出力を模擬
     if args.fps_override:
         fps = args.fps_override
     frame_bytes = w * h * 3

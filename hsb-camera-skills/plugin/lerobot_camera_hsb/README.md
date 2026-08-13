@@ -68,7 +68,9 @@ cam.disconnect()
 | `camera_mode` | `0` | 0: 2560×1984@30 / 1: 1920×1080@30 / 2: 2560×1984@60 / 3: 2560×1984@30(RAW8) |
 | `hololink_ip` | `192.168.0.2` | カメラ (HSB) の IP |
 | `color_mode` | `rgb` | `rgb` / `bgr` |
-| `fps` `width` `height` | mode から自動 | 明示指定時は mode と一致必須 |
+| `width` `height` | mode から自動 | **mode と異なる値を指定するとワーカーが縮小出力**(例: mode 1 + 640×360)。学習と推論で必ず同じ値にすること |
+| `exposure` | None (センサー既定) | 露光時間(行数、4-65535、1行≈29.7µs、30fps 上限≈1100)。屋内は 800-1000 推奨 |
+| `analog_gain` | None (=0) | アナログゲイン 0-12(倍率 = 16/(16-値))。露光で足りない分だけ上げる |
 | `hsb_python` | `/home/jetson/camera/venv/bin/python` | hololink が入った venv の python |
 | `connect_timeout_s` | `90` | enumeration + センサー設定 + 初フレームまでの許容時間 |
 | `reset` | `False` | `hololink.reset()` を発行(リンク不安定環境では False 推奨) |

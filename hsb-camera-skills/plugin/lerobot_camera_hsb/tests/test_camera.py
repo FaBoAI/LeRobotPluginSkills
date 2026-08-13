@@ -59,9 +59,19 @@ def test_config_rejects_bad_mode():
         make_config(camera_mode=9)
 
 
-def test_config_rejects_mismatched_resolution():
-    with pytest.raises(ValueError):
-        make_config(camera_mode=1, width=640, height=480)
+def test_config_accepts_downscale_resolution():
+    cfg = make_config(camera_mode=1, width=640, height=360)
+    assert (cfg.width, cfg.height, cfg.fps) == (640, 360, 30)
+
+
+def test_downscaled_read(camera):
+    cam = HSBCamera(make_config(camera_mode=1, width=640, height=360))
+    cam.connect(warmup=False)
+    try:
+        frame = cam.read()
+        assert frame.shape == (360, 640, 3)
+    finally:
+        cam.disconnect()
 
 
 def test_make_cameras_from_configs_resolves_plugin_class():

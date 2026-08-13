@@ -79,3 +79,39 @@ hsb_v2.5.0 は VB1940 の他に IMX274/IMX715/AR0234 など多数のセンサー
    (`DataChannel.use_sensor(metadata, n)`)。
 5. **実測データの追記**: 動作確認したら本ファイルにモード表・識別情報・
    癖(熱・リンク・タイミング)を追記する。
+
+## 追記 (2026-08-13): 露光・ゲイン・縮小出力の実測知見
+
+### 画像が暗い場合 — センサーレジスタで調整する
+
+VB1940 のモード既定露光は短く、屋内では暗い(平均輝度 30/255 程度)。
+プラグインの `exposure` / `analog_gain` 設定で改善する(configure() 後に
+`set_exposure_reg` / `set_analog_gain_reg` を書く実装):
+
+| 設定 | 平均輝度 (屋内実測) |
+|---|---|
+| 既定 | 30/255 |
+| exposure=800, analog_gain=2 | 51/255 |
+| **exposure=1000, analog_gain=6** | **81/255 (推奨)** |
+
+- exposure は行数単位 (1行≈29.7µs)。30fps ではフレーム時間 33ms ≈ 1100 行が上限
+- analog_gain は 0-12、倍率 = 16/(16-値)。ノイズが増えるため露光優先で調整
+- **学習データと推論時で同一設定にすること**(輝度分布のずれは精度に直結)
+
+### 縮小出力 (width/height) と解像度の設計
+
+- `width`/`height` をモード解像度と変えるとワーカーが cv2 INTER_AREA で縮小出力する
+  (例: camera_mode=1 + 640×360)。VB1940 の最小モードは 1080p なので、
+  それ以下の解像度はこの機能でしか得られない
+- 1080p は ACT 学習でチャンク推論 60ms・視覚トークン 2040 個と重い。
+  **640×360 なら約 8 倍高速**(実測: 学習スループット 8.4 倍、推論も同等の短縮)
+- 既存データセットの縮小変換は ffmpeg で可能 (フレーム数検証を必ず行う。
+  同一コーデック設定 AV1/CRF30/GOP2 を維持し、meta/info.json の
+  features.*.shape と video.height/width を書き換える)
+
+### VLA ポリシーと組み合わせる場合の注意
+
+- **SmolVLA** (`lerobot/smolvla_base`) はカメラ名 `camera1/2/3` 前提のため、
+  学習・推論の両方に `--rename_map='{"observation.images.front": "observation.images.camera1"}'`
+  が必要(データセット側がポリシーの部分集合なら検証は通る)
+- **GR00T N1.7** は new_embodiment がデータセットのカメラ名に自動適応するため rename 不要

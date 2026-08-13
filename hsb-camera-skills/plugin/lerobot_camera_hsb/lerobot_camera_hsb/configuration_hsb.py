@@ -33,6 +33,11 @@ class HSBCameraConfig(CameraConfig):
     connect_timeout_s: float = 90.0
     # hololink.reset() を発行するか (リンクが不安定な環境では False 推奨)
     reset: bool = False
+    # 露光時間 (行数, 4-65535, 1行≈29.7µs)。None = センサーのモード既定値。
+    # 30fps では ≈1100 行 (33ms) が上限目安。屋内なら 600-1000 程度が明るい。
+    exposure: int | None = None
+    # アナログゲイン (0-12)。ゲイン倍率 = 16/(16-値)。None = 既定 (0)。
+    analog_gain: int | None = None
     skip_setup_clock: bool = False
     shm_dir: str = "/dev/shm"
     # テスト/デバッグ用: ワーカースクリプトの差し替え (None = 同梱の hsb_worker.py)
@@ -52,9 +57,8 @@ class HSBCameraConfig(CameraConfig):
             self.height = h
         if self.fps is None:
             self.fps = fps
-        if (self.width, self.height) != (w, h):
-            raise ValueError(
-                f"width/height ({self.width}x{self.height}) が camera_mode "
-                f"{self.camera_mode} の {w}x{h} と一致しません。"
-                " リサイズが必要な場合は LeRobot 側の image transform を使ってください。"
-            )
+        if self.width <= 0 or self.height <= 0:
+            raise ValueError(f"不正な出力解像度: {self.width}x{self.height}")
+        # width/height がモードのネイティブ解像度 (w x h) と異なる場合、
+        # ワーカーがセンサー画像をその解像度へ縮小して出力する。
+        # 例: camera_mode=1 (1920x1080) + width=640, height=360 → 640x360 出力

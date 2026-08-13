@@ -37,6 +37,7 @@ _HOLOSCAN_PY = "/opt/nvidia/holoscan/python/lib"
 if _HOLOSCAN_PY not in sys.path and os.path.isdir(_HOLOSCAN_PY):
     sys.path.insert(0, _HOLOSCAN_PY)
 
+import cv2  # noqa: E402
 import cuda.bindings.driver as cuda  # noqa: E402
 import holoscan  # noqa: E402
 
@@ -61,6 +62,8 @@ class ShmWriterOp(holoscan.core.Operator):
 
     def __init__(self, fragment, *args, shm_path, width, height, fps,
                  condition=None, **kwargs):
+        # width/height は出力 (SHM) 解像度。センサー解像度と異なる場合は
+        # compute() 内で cv2.resize (INTER_AREA) で縮小する。
         self._shm_path = shm_path
         self._width = width
         self._height = height
@@ -104,6 +107,10 @@ class ShmWriterOp(holoscan.core.Operator):
 
         arr = cp.asarray(tensor)  # (H, W, 4) uint16 RGBA
         rgb8 = (arr[..., :3] >> 8).astype(cp.uint8).get()  # host RGB8
+        if rgb8.shape[0] != self._height or rgb8.shape[1] != self._width:
+            rgb8 = cv2.resize(
+                rgb8, (self._width, self._height), interpolation=cv2.INTER_AREA
+            )
 
         # seqlock write: 奇数 = 書き込み中
         self._seq += 1
@@ -119,7 +126,7 @@ class ShmWriterOp(holoscan.core.Operator):
 
 class WorkerApp(holoscan.core.Application):
     def __init__(self, cuda_context, cuda_device_ordinal, hololink_channel,
-                 camera, camera_mode, shm_path, fps):
+                 camera, camera_mode, shm_path, fps, out_width=None, out_height=None):
         super().__init__()
         self._cuda_context = cuda_context
         self._cuda_device_ordinal = cuda_device_ordinal
@@ -128,6 +135,8 @@ class WorkerApp(holoscan.core.Application):
         self._camera_mode = camera_mode
         self._shm_path = shm_path
         self._fps = fps
+        self._out_width = out_width
+        self._out_height = out_height
 
     def compose(self):
         self._ok = holoscan.conditions.BooleanCondition(
@@ -174,7 +183,8 @@ class WorkerApp(holoscan.core.Application):
 
         writer = ShmWriterOp(
             self, name="shm_writer", shm_path=self._shm_path,
-            width=self._camera._width, height=self._camera._height,
+            width=self._out_width or self._camera._width,
+            height=self._out_height or self._camera._height,
             fps=self._fps, condition=self._ok)
 
         self.add_flow(receiver, csi_to_bayer, {("output", "input")})
@@ -194,6 +204,14 @@ def main():
                         help="hololink.reset() を実行する (リンク不安定時は非推奨)")
     parser.add_argument("--skip-setup-clock", action="store_true")
     parser.add_argument("--log-level", type=int, default=20)
+    parser.add_argument("--exposure", type=int, default=None,
+                        help="露光時間 (行数, 4-65535, 1行≈29.7µs。30fpsでは≈1100が上限目安)")
+    parser.add_argument("--analog-gain", type=int, default=None,
+                        help="アナログゲイン (0-12, ゲイン=16/(16-値))")
+    parser.add_argument("--out-width", type=int, default=None,
+                        help="出力解像度 幅 (指定時に縮小。未指定=センサー解像度)")
+    parser.add_argument("--out-height", type=int, default=None,
+                        help="出力解像度 高さ")
     args = parser.parse_args()
 
     hololink_module.logging_level(args.log_level)
@@ -221,7 +239,8 @@ def main():
     camera_mode = hololink_module.sensors.vb1940.Vb1940_Mode(args.camera_mode)
 
     app = WorkerApp(cu_context, 0, hololink_channel, camera, camera_mode,
-                    args.shm_path, fps)
+                    args.shm_path, fps,
+                    out_width=args.out_width, out_height=args.out_height)
 
     hololink = hololink_channel.hololink()
     hololink.start()
@@ -237,6 +256,10 @@ def main():
         camera.get_register_32(0x0000)
         camera.get_register_32(0x0734)
         camera.configure(camera_mode)
+        if args.analog_gain is not None:
+            camera.set_analog_gain_reg(args.analog_gain)
+        if args.exposure is not None:
+            camera.set_exposure_reg(args.exposure)
         app.run()
     finally:
         hololink.stop()

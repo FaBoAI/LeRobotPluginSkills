@@ -30,7 +30,7 @@ from lerobot.cameras.camera import Camera
 from lerobot.cameras.configs import ColorMode
 from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnectedError
 
-from .configuration_hsb import HSBCameraConfig
+from .configuration_hsb import MODE_TABLE, HSBCameraConfig
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,13 @@ class HSBCamera(Camera):
             cmd.append("--reset")
         if cfg.skip_setup_clock:
             cmd.append("--skip-setup-clock")
+        if cfg.exposure is not None:
+            cmd += ["--exposure", str(cfg.exposure)]
+        if cfg.analog_gain is not None:
+            cmd += ["--analog-gain", str(cfg.analog_gain)]
+        native_w, native_h, _ = MODE_TABLE[cfg.camera_mode]
+        if (cfg.width, cfg.height) != (native_w, native_h):
+            cmd += ["--out-width", str(cfg.width), "--out-height", str(cfg.height)]
 
         logger.info("starting HSB worker: %s", " ".join(cmd))
         proc = subprocess.Popen(

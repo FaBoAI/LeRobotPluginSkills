@@ -45,7 +45,7 @@ hololink 専用 venv のワーカープロセス + /dev/shm seqlock ブリッジ
 
 | 対応機種 | 識別 | 備考 |
 |---|---|---|
-| Leopard Imaging VB1940 Eagle | BOOTP (UDP 12267)、MAC `8c:1f:64` | 10GigE PoE 直結。2560×1984@30 実測 30.2fps。カメラは要冷却(発熱でリンク断)、復帰は mgbe down/up。`hololink.reset()` 禁止 |
+| Leopard Imaging VB1940 Eagle | BOOTP (UDP 12267)、MAC `8c:1f:64` | 10GigE PoE 直結。2560×1984@30 実測 30.2fps。カメラは要冷却(発熱でリンク断)、復帰は mgbe down/up。`hololink.reset()` 禁止。露光/ゲイン調整(`exposure`/`analog_gain`)と任意解像度への縮小出力(`width`/`height`)対応 |
 
 ### [gemini305-camera-skills](./gemini305-camera-skills/) — Orbbec Gemini 305(USB ステレオデプス)
 
