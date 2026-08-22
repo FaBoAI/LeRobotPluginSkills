@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# LeRobot 0.6.x のプラグイン発見は「lerobot_teleoperator_ で始まる配布名を
+# そのまま import する」方式。配布名 = トップレベルパッケージ名 (アンダースコア維持)。
+name = "lerobot_teleoperator_otter_leader"
+version = "0.1.0"
+description = "Otter Leader (dual-arm 7DOF+gripper Dynamixel XL330) teleoperator plugin for LeRobot 0.6.x"
+authors = [{ name = "FaBo, Inc.", email = "akira@fabo.io" }]
+requires-python = ">=3.10"
+dependencies = [
+    "lerobot>=0.6.0",
+    "dynamixel-sdk>=3.7",
+    "deepdiff",  # lerobot MotorsBus が要求 (lerobot[deepdiff-dep] 相当)
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+# 注意 (Jetson): 既存の CUDA torch/numpy スタックを守るため
+#   pip install -e . --no-deps
+# でインストールすること。
+
+[tool.setuptools.packages.find]
+include = ["lerobot_teleoperator_otter_leader*"]

@@ -39,6 +39,15 @@ LeRobotプラグイン開発のための **Agent Skills** です。
 |---|---|---|
 | Meta Quest 3 | WebXR(同一WiFi) | パススルーで実機を見ながら操作。クラッチ式(グリップ=原点)、IKはURDF実寸・placo不要。joint_offsets_deg較正手順あり |
 
+### [otter-rs-teleop-skills](./otter-rs-teleop-skills/) — 両腕ヒューマノイド リーダー/フォロワー
+
+Dynamixel XL330 リーダー + RobStride CAN フォロワー(7DOF+グリッパ×左右=16軸ペア)の**テレオペレータ/ロボット両プラグイン**。リーダーの重力ドリフト対策(弱電流保持)・フォロワーの初期位置ランプ・グリッパ過電流ガードを含む。
+
+| 対応機種 | 識別 | 備考 |
+|---|---|---|
+| OtterLeader (FaBo, XL330-M288 ×16) | USB シリアル `/dev/ttyUSB*` (FTDI) | ID L:1-8 / R:11-18。肩3軸は Mode 5 + Goal_Current 25mA の弱バネ保持(ドリフト対策)。EMI 瞬断 (error -71) は connect リトライで吸収 |
+| RSFollower (RobStride RS00/03/05/06 ×16) | SocketCAN `can0` (1Mbps) | ID L:0x01-0x08 / R:0x11-0x18(リーダーと逆順)。connect/disconnect で初期位置へランプ移動(最大0.5rad/s)。グリッパは limit_torque 3.0N・m 検証 + 20Hz 監視 |
+
 ### [hsb-camera-skills](./hsb-camera-skills/) — Holoscan Sensor Bridge カメラ(10GigE)
 
 hololink 専用 venv のワーカープロセス + /dev/shm seqlock ブリッジによる**プロセス分離型カメラプラグイン**(LeRobot 側の Python/numpy と衝突しない)。
@@ -69,7 +78,7 @@ pyorbbecsdk (Orbbec SDK v2) を LeRobot と同一プロセスで直接使う**�
 ## 検証済み環境
 
 - LeRobot **0.6.0**(サードパーティプラグイン規約準拠、`pip install -e .` で `--teleop.type=<name>` / `--robot.cameras` の `"type"` が使用可能に)
-- ロボットアーム: **SO-101** フォロワー
+- ロボットアーム: **SO-101** フォロワー(teleop系)/ **RobStride 両腕ヒューマノイド**(otter-rs-teleop、16軸)
 - プラットフォーム: NVIDIA **Jetson Orin Nano**(テレオペ系、ヘッドレス、追加pip依存なしのevdev / ALSA raw MIDIバックエンド)/ NVIDIA **Jetson AGX Thor**(hsb-camera、JetPack 7 + Holoscan SDK 3.6 deb、Dockerレス)/ NVIDIA **Jetson**(gemini305-camera、aarch64 + Python 3.13 conda、pyorbbecsdk2 ホイール)
 - いずれも実機で動作検証済み(可動域・イベントボタン・`lerobot-record` 互換 / カメラは実カメラ 30fps 連続取得)
 

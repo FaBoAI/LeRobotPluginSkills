@@ -1,0 +1,41 @@
+type: otter_leader
+port: /dev/ttyUSB0
+
+use_left: true
+use_right: true
+
+# LEFT Leader: ID 1,2,3,4,5,6,7,8 の順で motor_names に割り当てる。
+left_start_id: 1
+left_motor_count: 8
+left_id_order: ascending
+
+# RIGHT Leader: ID 11,12,13,14,15,16,17,18 の順で motor_names に割り当てる。
+right_start_id: 11
+right_motor_count: 8
+right_id_order: ascending
+
+# ID が連番ではない場合、または ID 順を完全に指定したい場合はこちらを使う。
+# 指定した場合、*_start_id / *_motor_count / *_id_order より優先される。
+# left_motor_ids: [1, 2, 3, 4, 5, 6, 7, 8]
+# right_motor_ids: [11, 12, 13, 14, 15, 16, 17, 18]
+
+# デフォルトの 7DOF + Gripper の 8 軸名。
+# motor_names の順番と ID リストの順番が対応する。
+# action key は left_shoulder_yaw.pos / right_shoulder_yaw.pos のようになる。
+motor_names:
+  - shoulder_yaw
+  - shoulder_pitch
+  - shoulder_roll
+  - elbow_pitch
+  - wrist_yaw
+  - wrist_pitch
+  - wrist_roll
+  - gripper
+
+gripper_motor_names:
+  - gripper
+
+inverted_motor_names:
+  - elbow_pitch
+
+gripper_open_pos: 50.0
