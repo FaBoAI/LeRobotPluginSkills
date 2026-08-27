@@ -77,5 +77,13 @@ class OtterLeaderConfig(TeleoperatorConfig):
     # 実機フィードバックで 40→25 に調整 (2026-08-16「もう少し弱く」)
     drift_hold_current_ma: int = 25
 
+    # ---- グリッパ読み値の反転 ----
+    # 再キャリブレーションやサーボ整備でグリッパの正規化方向が
+    # データセット収録時と逆転した場合に、読み値を 100-v に反転する。
+    # フォロワー側の open/close を変えると過去のデータセット・学習済み
+    # ポリシーと非互換になるため、必ずリーダー側 (ここ) で合わせること。
+    # full 名 (left_gripper / right_gripper) で指定。
+    flipped_gripper_names: List[str] = field(default_factory=list)
+
     # 元実装互換。今回は特に使わないが、config schema のために残す。
     drive_joint_name: str = "wrist_roll"

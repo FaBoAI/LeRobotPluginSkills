@@ -455,6 +455,8 @@ class OtterLeader(Teleoperator):
 
             if self._is_gripper_motor(name):
                 teleop = norm_raw  # すでに 0〜100
+                if name in self.config.flipped_gripper_names:
+                    teleop = 100.0 - teleop  # 較正方向がデータセット規約と逆の個体を補正
                 logger.debug("OtterLeader %s: teleop=%7.3f", name, teleop)
             else:
                 teleop = (norm_raw + 100.0) * 0.5  # [-100,100] -> [0,100]
