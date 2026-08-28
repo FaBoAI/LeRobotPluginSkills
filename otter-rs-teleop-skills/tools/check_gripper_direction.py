@@ -1,7 +1,7 @@
 """リーダーのグリッパ読み値の向き診断。
 
 使い方: リーダーを USB 接続した状態で
-    /home/jetson/camera/lerobot060-venv/bin/python /home/jetson/RS/check_gripper_direction.py
+    /home/jetson/camera/lerobot060-venv/bin/python /home/jetson/Otter/check_gripper_direction.py
 15秒間、左右グリッパの読み値を表示する。
   前半: 両手を「開いた」状態で保持 → 後半: 両手を「閉じた」状態で保持。
 基準 (データセット収録時の規約): 開 = left_gripper ≈ 86 / right_gripper ≈ 9。

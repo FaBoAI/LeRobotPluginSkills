@@ -77,7 +77,8 @@ class OtterLeaderConfig(TeleoperatorConfig):
     # 実機フィードバックで 40→25 に調整 (2026-08-16「もう少し弱く」)
     drift_hold_current_ma: int = 25
     # 関節別の保持電流上書き (base 名 → mA)。未指定の関節は drift_hold_current_ma。
-    # 実機フィードバックで shoulder_roll のみ 25→18 に緩和 (2026-08-28)
+    # 実機フィードバックで shoulder_roll のみ 25→18 に緩和 (2026-08-28)。
+    # 18→13 も試したが弱すぎたため 18 に戻した (2026-08-29)
     drift_hold_current_overrides: Dict[str, int] = field(
         default_factory=lambda: {"shoulder_roll": 18}
     )

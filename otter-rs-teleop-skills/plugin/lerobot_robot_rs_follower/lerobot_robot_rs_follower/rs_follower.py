@@ -828,6 +828,10 @@ class RSFollower(Robot):
         script = getattr(self.cfg, "get_angle_script", None)
         if script:
             return Path(str(script)).expanduser()
+        # 既定はリポジトリ同梱版 (scripts/get_angle.py)。見つからない場合のみ旧来の ~/RS を見る
+        bundled = Path(__file__).resolve().parent.parent / "scripts" / "get_angle.py"
+        if bundled.is_file():
+            return bundled
         return Path.home() / "RS" / "get_angle.py"
 
     def _read_angle_once(
@@ -1394,6 +1398,17 @@ class RSFollower(Robot):
         if now - last_log >= interval:
             logger.log(level, "RSFollower gripper guard %s: " + msg, spec.full_name, *args)
             state["last_log_time"] = now
+            # 事後解析用の恒久ログ (ホスト/コンテナ共有の outputs/ 配下)。
+            # 端末を閉じてもトリップ履歴を追跡できるようにする。失敗は無視。
+            try:
+                import datetime
+                with open("/home/jetson/Otter/outputs/gripper_guard.log", "a") as f:
+                    f.write(
+                        f"{datetime.datetime.now():%m-%d %H:%M:%S.%f} "
+                        f"{logging.getLevelName(level)} {spec.full_name}: {msg % args}\n"
+                    )
+            except Exception:
+                pass
 
     @staticmethod
     def _limit_along_closing_direction(
@@ -1553,6 +1568,19 @@ class RSFollower(Robot):
                     f"{status_age:.3f}" if status_age is not None else "n/a",
                     f"{current_age:.3f}" if current_age is not None else "n/a",
                 )
+                # 事後解析用にファイルへも記録 (gripper_guard.log と同じ場所)
+                try:
+                    import datetime
+                    torque_s = (
+                        f"{measured_torque:.3f}" if measured_torque is not None else "n/a"
+                    )
+                    with open("/home/jetson/Otter/outputs/gripper_guard.log", "a") as f:
+                        f.write(
+                            f"{datetime.datetime.now():%m-%d %H:%M:%S.%f} TELEM {full_name}: "
+                            f"current={measured_current:.3f}A torque={torque_s}\n"
+                        )
+                except Exception:
+                    pass
                 state["last_current_log_time"] = now
 
         def finish(value: float) -> float:
@@ -1772,6 +1800,32 @@ class RSFollower(Robot):
             require_open = bool(
                 getattr(self.cfg, "gripper_overcurrent_latch_until_open", True)
             )
+
+            # FaBo パッチ: モータ本体の保護 (堵転/過電流) でフォルトすると
+            # フィードバックが途絶し、健全なステータスを要求する解除条件が
+            # 永遠に満たせず「手が死ぬ」。開き操作を合図に故障クリア +
+            # 再イネーブルを試みる (1秒に1回まで)。復活すれば新鮮なステータス
+            # が届き、通常の解除経路が機能する。
+            motor_faulted = (not status_ok) or (
+                status is not None and status.hard_fault
+            )
+            if opening_requested and cooled and motor_faulted:
+                last_try = float(state.get("last_reenable_time") or 0.0)
+                if now - last_try >= 1.0:
+                    state["last_reenable_time"] = now
+                    bus = self._bus_by_motor.get(spec.full_name)
+                    recover = getattr(bus, "try_fault_recovery", None)
+                    if callable(recover):
+                        try:
+                            ok = bool(recover())
+                        except Exception:
+                            ok = False
+                        self._log_gripper_guard(
+                            spec,
+                            logging.WARNING,
+                            "モータフォルト復旧を試行 (故障クリア+再イネーブル): %s",
+                            "OK" if ok else "送信失敗",
+                        )
 
             # Opening is always allowed.  Closing remains latched until the
             # cooldown/status conditions are satisfied and, by default, the

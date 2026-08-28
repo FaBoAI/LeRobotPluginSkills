@@ -45,8 +45,8 @@ Dynamixel XL330 リーダー + RobStride CAN フォロワー(7DOF+グリッパ×
 
 | 対応機種 | 識別 | 備考 |
 |---|---|---|
-| OtterLeader (FaBo, XL330-M288 ×16) | USB シリアル `/dev/ttyUSB*` (FTDI) | ID L:1-8 / R:11-18。肩3軸は Mode 5 + Goal_Current 25mA の弱バネ保持(ドリフト対策)。EMI 瞬断 (error -71) は connect リトライで吸収 |
-| RSFollower (RobStride RS00/03/05/06 ×16) | SocketCAN `can0` (1Mbps) | ID L:0x01-0x08 / R:0x11-0x18(リーダーと逆順)。connect/disconnect で初期位置へランプ移動(最大0.5rad/s)。グリッパは limit_torque 3.0N・m 検証 + 20Hz 監視 |
+| OtterLeader (FaBo, XL330-M288 ×16) | USB シリアル `/dev/ttyUSB*` (FTDI) | ID L:1-8 / R:11-18。肩3軸は Mode 5 + Goal_Current 25mA(shoulder_roll のみ 18mA)の弱バネ保持(ドリフト対策)。EMI 瞬断 (error -71) は connect リトライで吸収 |
+| RSFollower (RobStride RS00/03/05/06 ×16) | SocketCAN `can0` (1Mbps) | ID L:0x01-0x08 / R:0x11-0x18(リーダーと逆順)。connect/disconnect で初期位置へランプ移動(最大0.5rad/s)。グリッパは limit_torque 3.2N・m 検証 + 電流 20Hz 監視 + フォルト自動復旧 |
 
 ### [hsb-camera-skills](./hsb-camera-skills/) — Holoscan Sensor Bridge カメラ(10GigE)
 

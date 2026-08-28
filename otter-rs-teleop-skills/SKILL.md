@@ -107,8 +107,10 @@ LEADER_PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -1)
 ```
 
 - 事前チェック: `cat /sys/class/net/can0/operstate` が `up`、`/dev/ttyUSB*` が存在。
-- フォロワーの現在角度読み取りに `~/RS/get_angle.py` が必要
-  (`initial_position_require_feedback: true` のとき、読めないと安全のため起動を止める)。
+- フォロワーの現在角度読み取りは**プラグイン同梱の `scripts/get_angle.py`** を使う
+  (`get_angle_script` 未指定時の既定。見つからない場合のみ旧来の `~/RS/get_angle.py` に
+  フォールバック)。`initial_position_require_feedback: true` のとき、読めないと
+  安全のため起動を止める。
 
 ## Step 4: キャリブレーション
 
@@ -122,7 +124,11 @@ LEADER_PORT=$(ls /dev/ttyUSB* 2>/dev/null | head -1)
     可動域全体に動かして range 記録(ENTER で確定)。
   - フォロワー: `calibrate()` — 関節ごとに手で全域を動かし Ctrl+C で確定
     (get_angle.py で実角度を読む)。`inverted_motor_names` の軸は open/close が反転して
-    保存される(既定 YAML: right_shoulder_yaw/pitch/roll, right_wrist_pitch, left_gripper)。
+    保存される(既定 YAML: right_shoulder_yaw/pitch/roll, right_wrist_pitch, right_gripper)。
+- **警告: フォロワーの再較正 = 座標系の再定義**。正規化 0-100 の物理的意味が変わり、
+  旧較正で収録したデータセット・学習済みモデルと非互換になる(YAML の
+  `initial_position` が指す物理姿勢も変わる)。収録シリーズの途中で再較正しない。
+  詳細と座標系ずれの判定方法は `reference.md` §8。
 
 ## Step 5: teleop 起動
 
@@ -140,7 +146,8 @@ lerobot-teleoperate \
   姿勢が中立として保持されるので、**リーダーを中立姿勢に構えてから接続**する。
 - 操作感が重い/ドリフトが残る場合は `--teleop.drift_hold_current_ma=<20-60>` で調整
   (実機調整の経緯: 40 →「重い」→ 25 が既定、さらに shoulder_roll のみ
-  `drift_hold_current_overrides` で 18 に緩和 (2026-08-28)。0 で無効)。
+  `drift_hold_current_overrides` で 18 に緩和 — 13 は弱すぎで 18 に確定
+  (2026-08-29 実機確認)。0 で無効)。
 - フォロワーは connect() 内で `initial_position`(YAML のデータセット開始姿勢の平均)へ
   ゆっくり移動してから制御ループが始まる。**リーダーも初期位置付近に構えてから**
   ループ開始するとジャンプしない。
@@ -170,22 +177,29 @@ lerobot-record \
   上記の pgrep をスクリプトの事前チェックに入れる。
 - ヘッドレス (SSH) では `--display_data=false` 必須(rerun のチャネル詰まりで
   ループがブロックする)。
-- **エピソード間の自動初期位置復帰**(2026-08-28、test070 収録で使用):
+- **エピソード間の自動初期位置復帰 + 原点保持**(2026-08-28/29):
   各エピソード後のリセット区間の頭でフォロワーが `return_to_initial_position()`
-  により初期位置へゆっくり戻る(ブロッキング ~5 秒)。ただしこれは
-  **site-packages の `lerobot_record.py` への hasattr パッチが前提**
-  (バックアップ `.bak.epreset`、**venv 再構築時は要再適用**)。
+  により初期位置へゆっくり戻り(ブロッキング ~5 秒)、**リセット区間中は
+  テレオペ遮断で原点を保持** — 次の「Recording episode N」アナウンスまで
+  リーダーを動かしてもフォロワーは動かない。ただしこれは
+  **site-packages の `lerobot_record.py` へのパッチが前提**
+  (バックアップ `.bak.epreset` / `.bak.holdreset`、**venv 再構築時は要再適用**)。
   `--dataset.reset_time_s=5` 推奨 = 復帰 ~5 秒(reset_time_s の外)+
   配置 5 秒。詳細は `reference.md` §2。
 - **音声ガイド `--play_sounds=true`**: `spd-say`(USB スピーカー)が
   エピソード開始/リセットを読み上げる。開始タイミング問題の解消
   (`reference.md` §5)。
-- グリッパは過電流ガードが常時有効(motor 側 4.0N・m / 8.0A 上限 + 20Hz 監視。
-  2026-08-28 に 3.0N・m 系から再調整 — **トルク予算を変えるときは電流予算も
-  ~1.7A/N・m で釣り合わせること**。詳細は `reference.md` §5)。
-  `HARD LIMIT: backing off` ログが出たら把持対象を確認。
+- グリッパは過電流ガードが常時有効(把持トルク **3.2N・m** / limit_cur 8.0A +
+  20Hz 監視。2026-08-29 に 4.0N・m 系から再調整 — 「すぐロック」の真因は
+  **モータ内部の堵転保護**(≈6.8A 持続で発火)で、把持予算を保護域外
+  (定常 ≈5.2A)に置く + フォルト自動復旧で解決。詳細は `reference.md` §5)。
+  `HARD LIMIT: backing off` ログが出たら把持対象を確認。ガードのトリップ履歴は
+  `/home/jetson/Otter/outputs/gripper_guard.log` に恒久記録される。
 - USB serial error -71 で収録が中断したら、続きから `--resume=true` で再開する
   (connect の 1 回リトライで自動復帰することも多い。`reference.md` §3)。
+- 状態表示ディスプレイ(OtterTools)併用時は run スクリプトの
+  `tool/display_status.sh` / `tool/display_idle_daemon.py` が状態を表示する
+  (未接続なら無害。`reference.md` §5)。
 
 ## Step 7: 知見の記録
 

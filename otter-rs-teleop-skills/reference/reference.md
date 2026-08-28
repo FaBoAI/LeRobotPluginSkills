@@ -45,6 +45,8 @@ self.bus.write("Goal_Position", motor, pos)
   (2026-08-16「もう少し弱く」)。大きいほど強く戻るが操作が重くなる。
   さらに **shoulder_roll のみ 25→18mA に緩和**(2026-08-28 実機フィードバック、
   他の 2 軸は 25mA のまま)— 一律に下げるとドリフトが戻るため関節別上書きで対応。
+  18→13mA も試したが**弱すぎた**ため 18 に戻して確定(2026-08-29 実機確認。
+  shoulder_roll の適正域は 25=重い / 18=適正 / 13=弱すぎ、と狭い)。
 - 起動確認: 接続時に `OtterLeader drift-hold: <motor> を 25mA で現在位置 <pos> に
   弱保持` が 6 行(3軸×左右)出る。
 - **wrist_yaw のベルト(DOF5/15)も `drift_hold_motor_names` に `wrist_yaw` を
@@ -61,7 +63,8 @@ self.bus.write("Goal_Position", motor, pos)
 設定すると、`connect()` はその姿勢へのランプ移動を完了してから返る。
 → **推論 / teleop の制御ループはアームが初期位置で静止した状態から始まる**。
 同梱 YAML の値はデータセット humanoid_test060 の全30エピソード開始姿勢の平均
-(2026-08-13 算出)。
+(2026-08-13 算出。**当時の較正が前提** — 再較正すると同じ正規化値でも
+物理姿勢が変わる、§8)。
 
 connect() の順序(`rs_follower.py`):
 
@@ -117,8 +120,14 @@ connect() の順序(`rs_follower.py`):
    `if hasattr(robot, "return_to_initial_position"):` で呼び出す(ブロッキング ~5秒)。
    復帰中の Ctrl+C は `return_to_initial_on_disconnect=False` にしてから
    `robot.disconnect()` + 再 raise(二度目の復帰をしない即トルク断)。
+   - **リセット区間はテレオペ遮断で原点保持(2026-08-29 追加)**: 復帰後の
+     リセット区間は `record_loop()`(テレオペ送信あり)ではなく単純な待機ループに
+     置き換えた — **次の「Recording episode N」アナウンスまで、リーダーを
+     動かしてもフォロワーは初期位置から動かない**。リセット中の構え直しで
+     フォロワーが釣られて動く問題の解消。キー操作(次へ/再収録/停止)は有効。
    - パッチ対象: `<venv>/lib/python3.12/site-packages/lerobot/scripts/lerobot_record.py`
-     (バックアップ `.bak.epreset` を同ディレクトリに退避)。
+     (バックアップ `.bak.epreset`(復帰のみ)と `.bak.holdreset`(原点保持前)を
+     同ディレクトリに退避)。
    - **venv 再構築時は要再適用**。hasattr 検出なので、パッチが無くても
      壊れはしない(復帰しなくなるだけ)。他ロボットにも無害。
 - 運用値: **`--dataset.reset_time_s=5` 推奨** — 復帰ランプ ~5 秒(ブロッキング、
@@ -254,8 +263,8 @@ fi
 
 物体に触れるまでの自由閉じ速度は制限せず、保持力だけを制御する多層ガード。
 **以下の数値は v0.0.17 当時の初期調整値(= dataclass 既定)**。実運用の閾値は
-2026-08-28 に同梱 YAML で 4.0N・m 系へ再調整済み — 次項「グリッパ把持予算の
-実機調整」の表が現行の正:
+同梱 YAML で 4.0N・m 系(2026-08-28)→ **3.2N・m 系(2026-08-29、現行)**へ
+再調整済み — 次項「グリッパ把持予算の実機調整」の表が現行の正:
 
 - **motor 側ハード上限(最優先)**: enable 前に RobStride `limit_torque` (0x700B) に
   `gripper_max_torque_nm=3.0` を書き込み**読み戻し検証**
@@ -281,45 +290,93 @@ fi
 - フィードバック欠落時はフルトルクへ上げない
   (`gripper_require_status_for_full_torque=true`、上限 1.80N・m)。
 
-### グリッパ把持予算の実機調整(2026-08-28)
+### グリッパ把持予算の実機調整(2026-08-28 → 08-29 で確定)
 
-収録実運用で「保持力が足りず物体が滑る」フィードバック → 把持予算を
-3.0 → **4.0N・m 系**へ引き上げた。値は**同梱 YAML
+収録実運用で「保持力が足りず物体が滑る」→ 把持予算を 3.0 → 4.0N・m 系へ
+引き上げた(2026-08-28)が、今度は**収録中に「すぐロックして手が死ぬ」が頻発**。
+ソフトしきい値の緩和(rs-follower `2151e49`)では直らず、テレメトリの実測で
+真因を確定して **3.2N・m 系へ再調整**した(`f1207f2`、現行)。値は**同梱 YAML
 (`configs/rs_follower_7dof_gripper.yaml`)側**で上書きしている
 (dataclass 既定と `examples/` の YAML は v0.0.17 の 3.0N・m 系のまま)。
 
-**鉄則: トルク予算を変えたら電流予算も必ず釣り合わせる**。RS05 の実測換算は
-**~1.7A/N・m**(実測: 3.74N・m 保持時に iqf 6.28A)。トルクだけ 4.0N・m に
-上げて電流制限を 6.5A のまま据え置いた最初の試行では、強く掴んだ瞬間に
-6.28A が `limit_cur` 6.5A に到達し、**モータ側の過電流フォルトでグリッパが
-ロック**した(プラグインのガードより先にモータ自身の保護が働く状態)。
+**「すぐロック」の真因はモータ内部の堵転(ストール)保護**
+(`outputs/gripper_guard.log` + テレオペログの実測で確定):
 
-| パラメータ | v0.0.17 | 2026-08-28 | 換算根拠 (~1.7A/N・m) |
+- 4.0N・m 保持の定常電流 ≈6.8A が数秒持続すると、RS05 **自身の堵転保護**が
+  overcurrent フラグ→フォルトを立てる(`limit_cur` 8.0A より低い電流で発火する
+  別系統の保護。プラグインのソフトしきい値をいくら緩めても防げない)。
+- フォルト後は**フィードバックが途絶**するため、「健全なステータス/電流」を
+  要求するガードの解除条件が永遠に満たせず、**再接続までハンドが死ぬ**。
+
+対策(3本柱、rs-follower `f1207f2` / `f802787`):
+
+1. **把持トルク 4.0 → 3.2N・m**: 定常電流 ≈5.2A(実測)で堵転保護の発火域外。
+2. **フォルト自動復旧 `RobStrideBus.try_fault_recovery()`**: RobStride 私有
+   プロトコルの Type4 (STOP) `data[0]=1` = 故障クリア → 再イネーブルの順に送る
+   (RAM のトルク/電流上限は電源断まで保持されるので再設定不要)。ガードは
+   ラッチ中に「開き操作 + クールダウン後もモータ沈黙/フォルト継続」を検出すると
+   これを自動試行する(1 秒レート制限)。復活すれば新鮮なステータスが届き
+   通常の解除経路が機能する。
+3. **接触ホールドの入り/解除を緩和**: `gripper_contact_torque_nm` 1.0→**1.5**
+   (軽接触で即ホールドに入らない)、`gripper_guard_release_rad` 0.12→**0.05**
+   (少し開けばすぐ解除 — 従来は可動域の約 10% 開くまで無反応で「手が死ぬ」感覚)。
+
+| パラメータ | v0.0.17 | 08-28 (4.0系) | **現行 08-29 (3.2系)** |
 |---|---|---|---|
-| `gripper_max_torque_nm` (limit_torque 0x700B) | 3.0 | **4.0** | — |
-| `gripper_torque_soft_limit_nm` | 2.85 | **3.8** | — |
-| `gripper_torque_hard_limit_nm` | 3.15 | **4.3** | — |
-| `gripper_torque_release_nm` | 2.70 | **3.60** | — |
-| `gripper_contact_initial_torque_nm` | 2.20 | **2.80** | — |
-| `gripper_no_status_max_torque_nm` | 1.80 | **2.40** | — |
-| `gripper_hardware_current_limit_a` (limit_cur 0x7018) | 6.5 | **8.0** | 4.0N・m×1.7≈6.8 + 余裕 |
-| `gripper_current_soft_limit_a` | 5.5 | **7.0** | soft 3.8N・m 相当超 |
-| `gripper_current_hard_limit_a` | 6.2 | **7.5** | hard 4.3N・m×1.7≈7.3 |
-| `gripper_current_release_a` | 5.0 | **6.0** | release 3.6N・m×1.7≈6.1 |
-| `gripper_overcurrent_latch_until_open` | true | **false** | 下記 |
+| `gripper_max_torque_nm` (limit_torque 0x700B) | 3.0 | 4.0 | **3.2** |
+| `gripper_torque_soft_limit_nm` | 2.85 | 3.8→4.0 | **3.2** |
+| `gripper_torque_hard_limit_nm` | 3.15 | 4.3 | **3.6** |
+| `gripper_torque_release_nm` | 2.70 | 3.6→3.7 | **2.90** |
+| `gripper_contact_torque_nm` | 1.00 | 1.00 | **1.50** |
+| `gripper_contact_initial_torque_nm` | 2.20 | 2.80 | **2.60** |
+| `gripper_no_status_max_torque_nm` | 1.80 | 2.40 | 2.40 |
+| `gripper_hardware_current_limit_a` (limit_cur 0x7018) | 6.5 | 8.0 | 8.0 |
+| `gripper_current_soft_limit_a` | 5.5 | 7.0→7.2 | 7.2 |
+| `gripper_current_hard_limit_a` | 6.2 | 7.5→7.8 | 7.8 |
+| `gripper_current_release_a` | 5.0 | 6.0→6.2 | 6.2 |
+| `gripper_current_trip_confirm_count` | 2 | 2→3 | 3 |
+| `gripper_overcurrent_backoff_rad` | 0.05 | 0.05→0.04 | 0.04 |
+| `gripper_overcurrent_cooldown_s` | 1.5 | 1.5→0.8 | 0.8 |
+| `gripper_overcurrent_latch_until_open` | true | false | false |
+| `gripper_guard_release_rad` | 0.12 | 0.12 | **0.05** |
 
+- **鉄則: トルク予算を変えたら電流予算も釣り合わせる**。RS05 の実測換算は
+  **~1.6〜1.7A/N・m**(実測: 3.2N・m 保持時 iqf ≈5.2A / 3.74N・m 時 6.28A)。
+  ただし電流上限(limit_cur)の釣り合いだけでは不十分 — **堵転保護は
+  limit_cur より低い持続電流で発火する**ため、把持予算そのものを保護域外
+  (定常 ≈5.4A 以下)に置くのが本質的な対策。
 - **`latch_until_open=false` の理由**: true だと、トリップのたびにオペレーターが
-  `gripper_guard_release_rad`(0.12rad)以上大きく開き直すまで閉じがブロックされ、
-  収録のテンポが崩れる。false ではトリップ後 **1.5 秒のクールダウン
-  (`gripper_overcurrent_cooldown_s`)+ 健全なステータス/電流**を条件に、
+  `gripper_guard_release_rad` 以上大きく開き直すまで閉じがブロックされ、
+  収録のテンポが崩れる。false ではトリップ後クールダウン
+  (`gripper_overcurrent_cooldown_s`)+ 健全なステータス/電流を条件に、
   通常の開き操作だけでラッチが解除され把持に復帰できる。モータ側の
   `limit_torque`/`limit_cur` ハード上限は常時残るため安全側は崩れない。
-- トリップ判定の確認サンプル数(トルク×3 / 電流×2)と `backoff_rad=0.05` は不変。
-- hard 閾値と motor 側上限のずれは意図的:
-  - トルク: hard 4.3 > limit_torque 4.0 — 上限で正常飽和しているだけの状態を
-    誤検出しない余裕。
-  - 電流: hard 7.5 < limit_cur 8.0 — **プラグインのガード(backoff+ラッチ)が
-    モータ側フォルトより先に働く**順序を保証する余裕(上記ロック事象の再発防止)。
+- **ガードイベント + テレメトリの恒久記録**: ガードのトリップ/接触検出等は
+  `/home/jetson/Otter/outputs/gripper_guard.log` に追記される
+  (ホスト/コンテナ共有、端末を閉じても事後解析できる)。実測調整のため
+  `gripper_current_log_enabled: true` / `interval 0.5s` で電流・トルクの
+  TELEM 行も同じファイルに記録中。しきい値をいじる前に必ずこのログで
+  実電流を確認すること。
+
+### OtterTools ディスプレイ統合(2026-08-29)
+
+ロボット前面の状態表示ディスプレイ([FaBoAI/OtterTools](https://github.com/FaBoAI/OtterTools)、
+ESP32-S3 丸型 LCD)。USB CDC `/dev/ttyACM0` に**改行区切り 1 行 JSON** を書くだけで
+状態を表示できる(プラグイン本体ではなく起動スクリプト側の統合):
+
+- **`tool/display_status.sh <state>`**(`/home/jetson/Otter/tool/`):
+  状態プリセット `docker/record/teleop/infer/calib/idle/train` + `raw '<JSON>'`。
+  IP アドレスを毎回自動取得して上部に表示。**ディスプレイ未接続なら黙って成功終了**
+  する(呼び出し元スクリプトを失敗させない)ので、無条件に挿入してよい。
+- **`tool/display_idle_daemon.py`**: 起動 60 秒後(`--startup-delay`)に待機画面へ。
+  lerobot 系プロセス実行中は画面に触らず、終了検出で待機画面へ戻す
+  (スクリプト側 trap の保険)。待機中のみ QDD 16 台 (0x01-0x08/0x11-0x18) を
+  **GET_ID(通信タイプ 0、読み取り専用)**でスキャンし生存を丸表示 —
+  モータ状態は一切変更しない。実行中判定に掛かっている間は CAN に触らない。
+- 収録/推論/学習の全 run スクリプト(record 3 + infer 7 + train 10 = 20 本)に
+  `trap '… idle' EXIT` + 開始時の状態表示を挿入済み。
+
+### その他の運用規則
 
 - **CAN 設定**: bitrate 1000000, `restart-ms 100`, `txqueuelen 1000`(can0_on.sh)。
 - **fps**: teleop 単体は 60、収録は `--dataset.fps=30`(カメラ 30fps に合わせる)。
@@ -395,3 +452,33 @@ fi
    YAML の inverted_motor_names も修正)。フォロワーの規約自体を変えると
    過去のデータセット・学習済みポリシーが全て逆動作になる
 4. リーダー側が反転した場合の保険: `flipped_gripper_names` (読み値を 100-v に補正)
+
+## §8 再較正 = 座標系の再定義 (2026-08-28) — データセット/モデル互換性
+
+### 再較正は「壊れたら直す」作業ではない
+
+フォロワーの較正 (open_rad/close_rad) は **正規化 0-100 の物理的意味そのもの**を
+定義している。較正をやり直すと同じ正規化値が指す物理姿勢が変わるため:
+
+- **旧較正で収録したデータセット・学習済みモデルと非互換になる**
+  (実例: 再較正後、test060 系データセットで学習したモデルの動きが
+  現座標系で数度ズレる)
+- YAML `initial_position` の正規化値も**物理姿勢が変わる**
+  (同梱 YAML の値は test060 収録時の較正が前提)
+- §7 のグリッパ反転も再較正の副作用として起き得る
+
+**収録シリーズの途中で再較正しない**こと。やむを得ず再較正したら、それ以降は
+新シリーズとして扱い、旧モデルの推論には座標ズレを疑う。
+
+### 座標系ずれの有無の判定方法 (実績あり)
+
+- **使える: 映像テンプレートマッチング** — 両日のデータセットから
+  「関節状態 (正規化値) がほぼ一致するフレーム」を探し、カメラ映像の
+  アーム位置をテンプレートマッチングで比較する。実測でずれ 3px = 座標系ずれ無し
+  と判定できた (カメラ・ロボット双方が固定されている前提)。
+- **使えない: 較正端点の手押し再測定** — 端まで手で押し付ける測定は
+  スイープ圧のかけ方で **±0.1 rad ばらつく**ため、数度レベルのずれの
+  判定には使えない。
+- 補足: RobStride は**トルクオフ後に自重でストッパーへもたれる**ため、
+  接続時の読取角が較正端の少し外側にあっても正常
+  (§6 のレンジ整合チェックはマージン ±0.5 rad でこれを許容している)。
