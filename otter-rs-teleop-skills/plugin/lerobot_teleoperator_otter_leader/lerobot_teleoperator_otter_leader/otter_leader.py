@@ -404,15 +404,20 @@ class OtterLeader(Teleoperator):
         for motor in self.bus.motors:
             if not self._is_drift_hold_motor(motor) or self._is_gripper_motor(motor):
                 continue
+            hold_ma = int(
+                dict(self.config.drift_hold_current_overrides or {}).get(
+                    self._base_motor_name(motor), self.config.drift_hold_current_ma
+                )
+            )
             self.bus.write("Operating_Mode", motor, OperatingMode.CURRENT_POSITION.value)
-            self.bus.write("Goal_Current", motor, int(self.config.drift_hold_current_ma))
+            self.bus.write("Goal_Current", motor, hold_ma)
             self.bus.enable_torque(motor)
             if self.is_calibrated:
                 pos = float(self.bus.read("Present_Position", motor))
                 self.bus.write("Goal_Position", motor, pos)
                 logger.info(
                     "OtterLeader drift-hold: %s を %dmA で現在位置 %.1f に弱保持",
-                    motor, self.config.drift_hold_current_ma, pos,
+                    motor, hold_ma, pos,
                 )
 
     def setup_motors(self) -> None:

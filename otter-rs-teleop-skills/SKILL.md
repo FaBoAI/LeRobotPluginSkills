@@ -135,11 +135,12 @@ lerobot-teleoperate \
 
 起動時に確認すること:
 
-- リーダーのログに `drift-hold: … 25mA で現在位置 … に弱保持` が **6 行**
-  (肩3軸×左右)出ること。オペレーターは接続時の姿勢が中立として保持されるので、
-  **リーダーを中立姿勢に構えてから接続**する。
+- リーダーのログに `drift-hold: … に弱保持` が **6 行**(肩3軸×左右)出ること
+  (shoulder_yaw/pitch は 25mA、shoulder_roll は 18mA)。オペレーターは接続時の
+  姿勢が中立として保持されるので、**リーダーを中立姿勢に構えてから接続**する。
 - 操作感が重い/ドリフトが残る場合は `--teleop.drift_hold_current_ma=<20-60>` で調整
-  (実機調整の経緯: 40 →「重い」→ 25 が既定。0 で無効)。
+  (実機調整の経緯: 40 →「重い」→ 25 が既定、さらに shoulder_roll のみ
+  `drift_hold_current_overrides` で 18 に緩和 (2026-08-28)。0 で無効)。
 - フォロワーは connect() 内で `initial_position`(YAML のデータセット開始姿勢の平均)へ
   ゆっくり移動してから制御ループが始まる。**リーダーも初期位置付近に構えてから**
   ループ開始するとジャンプしない。
@@ -157,9 +158,10 @@ lerobot-record \
     --teleop.type=otter_leader --teleop.id=blue --teleop.port=$LEADER_PORT \
     --dataset.repo_id=local/<name> --dataset.root=<path> \
     --dataset.push_to_hub=false --dataset.single_task="..." \
-    --dataset.fps=30 --dataset.episode_time_s=15 --dataset.reset_time_s=2 \
+    --dataset.fps=30 --dataset.episode_time_s=20 --dataset.reset_time_s=5 \
     --dataset.num_episodes=30 \
-    --display_data=false
+    --display_data=false \
+    --play_sounds=true
 ```
 
 - **毎フレームのログは DEBUG レベルに置くこと**(INFO に置いた毎フレームログは
@@ -168,8 +170,20 @@ lerobot-record \
   上記の pgrep をスクリプトの事前チェックに入れる。
 - ヘッドレス (SSH) では `--display_data=false` 必須(rerun のチャネル詰まりで
   ループがブロックする)。
-- グリッパは過電流ガードが常時有効(motor 側 3.0N・m 上限 + 20Hz 監視。
-  詳細は `reference.md` §5)。`HARD LIMIT: backing off` ログが出たら把持対象を確認。
+- **エピソード間の自動初期位置復帰**(2026-08-28、test070 収録で使用):
+  各エピソード後のリセット区間の頭でフォロワーが `return_to_initial_position()`
+  により初期位置へゆっくり戻る(ブロッキング ~5 秒)。ただしこれは
+  **site-packages の `lerobot_record.py` への hasattr パッチが前提**
+  (バックアップ `.bak.epreset`、**venv 再構築時は要再適用**)。
+  `--dataset.reset_time_s=5` 推奨 = 復帰 ~5 秒(reset_time_s の外)+
+  配置 5 秒。詳細は `reference.md` §2。
+- **音声ガイド `--play_sounds=true`**: `spd-say`(USB スピーカー)が
+  エピソード開始/リセットを読み上げる。開始タイミング問題の解消
+  (`reference.md` §5)。
+- グリッパは過電流ガードが常時有効(motor 側 4.0N・m / 8.0A 上限 + 20Hz 監視。
+  2026-08-28 に 3.0N・m 系から再調整 — **トルク予算を変えるときは電流予算も
+  ~1.7A/N・m で釣り合わせること**。詳細は `reference.md` §5)。
+  `HARD LIMIT: backing off` ログが出たら把持対象を確認。
 - USB serial error -71 で収録が中断したら、続きから `--resume=true` で再開する
   (connect の 1 回リトライで自動復帰することも多い。`reference.md` §3)。
 

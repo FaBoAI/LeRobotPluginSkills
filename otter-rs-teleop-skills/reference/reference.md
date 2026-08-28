@@ -39,8 +39,12 @@ self.bus.write("Goal_Position", motor, pos)
   - `drift_hold_current_ma`: 保持電流 [mA](XL330 の Goal_Current 単位 = 1mA)。
     **既定 25**。20〜60mA で調整、0 で無効。CLI 上書き例:
     `--teleop.drift_hold_current_ma=60`。
+  - `drift_hold_current_overrides`: **関節別の保持電流上書き**(base 名 → mA)。
+    未指定の関節は `drift_hold_current_ma`。既定 `{"shoulder_roll": 18}`。
 - **実機調整の経緯**: 40mA で実装 → ユーザー体感「重い」→ **25mA が既定**
   (2026-08-16「もう少し弱く」)。大きいほど強く戻るが操作が重くなる。
+  さらに **shoulder_roll のみ 25→18mA に緩和**(2026-08-28 実機フィードバック、
+  他の 2 軸は 25mA のまま)— 一律に下げるとドリフトが戻るため関節別上書きで対応。
 - 起動確認: 接続時に `OtterLeader drift-hold: <motor> を 25mA で現在位置 <pos> に
   弱保持` が 6 行(3軸×左右)出る。
 - **wrist_yaw のベルト(DOF5/15)も `drift_hold_motor_names` に `wrist_yaw` を
@@ -49,7 +53,7 @@ self.bus.write("Goal_Position", motor, pos)
   EXTENDED_POSITION(トルクフリー)にする。`_is_drift_hold_motor()` は
   `drift_hold_current_ma <= 0` のとき常に False を返すので、電流 0 = 完全に従来動作。
 
-## 2. フォロワーの初期位置運用(connect で移動・disconnect で復帰)
+## 2. フォロワーの初期位置運用(connect で移動・エピソード間/disconnect で復帰)
 
 ### connect(): 初期位置へのブロッキングランプ移動
 
@@ -95,6 +99,32 @@ connect() の順序(`rs_follower.py`):
   `initial_position` 未設定または `initial_position_ramp_enabled=False` なら何もしない。
 - targets の計算は `_initial_position_targets()` に抽出されており、
   connect/disconnect で共通(未指定の関節は現在角度を維持)。
+
+### エピソード間の自動初期位置復帰(2026-08-28 実装、test070 収録で使用)
+
+収録のリセット区間ごとにフォロワーを初期位置へ戻す仕組み。2 つの部品から成る:
+
+1. **`RSFollower.return_to_initial_position()`(public メソッド)**: 現在の指令位置
+   から `initial_position` へ connect/disconnect と同じランプ機構でゆっくり移動する。
+   - **開始点は直近の指令値 (`_last_targets`)** — disconnect 時と違い実フィードバック
+     を読み直さない。即座に開始でき、指令の連続性が保たれるため座標系ずれも
+     発生しない(§6 の事故モードに入らない)。
+   - 失敗しても `logger.exception` して**収録は続行**する。
+   - 復帰ランプ中の Ctrl+C は**ログして再送出**(握りつぶすと停止意図が失われ、
+     送出したままだと disconnect が走らずトルクが入ったままプロセスが落ちる)。
+2. **`lerobot_record.py` への site-packages パッチ**: リセット区間の頭
+   (`log_say("Reset the environment", …)` 直後)に
+   `if hasattr(robot, "return_to_initial_position"):` で呼び出す(ブロッキング ~5秒)。
+   復帰中の Ctrl+C は `return_to_initial_on_disconnect=False` にしてから
+   `robot.disconnect()` + 再 raise(二度目の復帰をしない即トルク断)。
+   - パッチ対象: `<venv>/lib/python3.12/site-packages/lerobot/scripts/lerobot_record.py`
+     (バックアップ `.bak.epreset` を同ディレクトリに退避)。
+   - **venv 再構築時は要再適用**。hasattr 検出なので、パッチが無くても
+     壊れはしない(復帰しなくなるだけ)。他ロボットにも無害。
+- 運用値: **`--dataset.reset_time_s=5` 推奨** — 復帰ランプ ~5 秒(ブロッキング、
+  reset_time_s の外)+ reset 区間 5 秒で物品の再配置とリーダーの構え直しをする。
+- 復帰完了ログ「初期位置への復帰完了 — 物品を配置し、リーダーを初期位置に
+  構えてください」が次エピソードの準備合図。
 
 ## 3. USB シリアル (FTDI) の EMI 瞬断対策
 
@@ -222,7 +252,10 @@ fi
 
 ### グリッパの過電流/トルクガード(RS05、v0.0.17 で確定)
 
-物体に触れるまでの自由閉じ速度は制限せず、保持力だけを制御する多層ガード:
+物体に触れるまでの自由閉じ速度は制限せず、保持力だけを制御する多層ガード。
+**以下の数値は v0.0.17 当時の初期調整値(= dataclass 既定)**。実運用の閾値は
+2026-08-28 に同梱 YAML で 4.0N・m 系へ再調整済み — 次項「グリッパ把持予算の
+実機調整」の表が現行の正:
 
 - **motor 側ハード上限(最優先)**: enable 前に RobStride `limit_torque` (0x700B) に
   `gripper_max_torque_nm=3.0` を書き込み**読み戻し検証**
@@ -239,7 +272,8 @@ fi
 - **ハードトリップ**: torque≥3.15N・m ×3 サンプル、電流≥6.2A ×2 サンプル、
   または過電流/stall/フォルトフラグ → **0.05rad 開いてラッチ**
   (`gripper_overcurrent_backoff_rad=0.05`)、1.5 秒クールダウン後に
-  オペレーターが明示的に開くと解除(`gripper_overcurrent_latch_until_open=true`)。
+  オペレーターが明示的に開くと解除(`gripper_overcurrent_latch_until_open=true`。
+  **現行 YAML は false** — 次項参照)。
 - **RS05 のトルク換算は ±5.5N・m**(公式仕様)。v0.0.16 以前は RS02 の ±17N・m を
   誤用しており、読みが約 3.09 倍大きく、ガードが要求よりはるかに弱い力で作動していた。
   status 換算表は `robstride_bus.py` の `STATUS_LIMITS`
@@ -247,12 +281,55 @@ fi
 - フィードバック欠落時はフルトルクへ上げない
   (`gripper_require_status_for_full_torque=true`、上限 1.80N・m)。
 
-### その他の運用規則
+### グリッパ把持予算の実機調整(2026-08-28)
+
+収録実運用で「保持力が足りず物体が滑る」フィードバック → 把持予算を
+3.0 → **4.0N・m 系**へ引き上げた。値は**同梱 YAML
+(`configs/rs_follower_7dof_gripper.yaml`)側**で上書きしている
+(dataclass 既定と `examples/` の YAML は v0.0.17 の 3.0N・m 系のまま)。
+
+**鉄則: トルク予算を変えたら電流予算も必ず釣り合わせる**。RS05 の実測換算は
+**~1.7A/N・m**(実測: 3.74N・m 保持時に iqf 6.28A)。トルクだけ 4.0N・m に
+上げて電流制限を 6.5A のまま据え置いた最初の試行では、強く掴んだ瞬間に
+6.28A が `limit_cur` 6.5A に到達し、**モータ側の過電流フォルトでグリッパが
+ロック**した(プラグインのガードより先にモータ自身の保護が働く状態)。
+
+| パラメータ | v0.0.17 | 2026-08-28 | 換算根拠 (~1.7A/N・m) |
+|---|---|---|---|
+| `gripper_max_torque_nm` (limit_torque 0x700B) | 3.0 | **4.0** | — |
+| `gripper_torque_soft_limit_nm` | 2.85 | **3.8** | — |
+| `gripper_torque_hard_limit_nm` | 3.15 | **4.3** | — |
+| `gripper_torque_release_nm` | 2.70 | **3.60** | — |
+| `gripper_contact_initial_torque_nm` | 2.20 | **2.80** | — |
+| `gripper_no_status_max_torque_nm` | 1.80 | **2.40** | — |
+| `gripper_hardware_current_limit_a` (limit_cur 0x7018) | 6.5 | **8.0** | 4.0N・m×1.7≈6.8 + 余裕 |
+| `gripper_current_soft_limit_a` | 5.5 | **7.0** | soft 3.8N・m 相当超 |
+| `gripper_current_hard_limit_a` | 6.2 | **7.5** | hard 4.3N・m×1.7≈7.3 |
+| `gripper_current_release_a` | 5.0 | **6.0** | release 3.6N・m×1.7≈6.1 |
+| `gripper_overcurrent_latch_until_open` | true | **false** | 下記 |
+
+- **`latch_until_open=false` の理由**: true だと、トリップのたびにオペレーターが
+  `gripper_guard_release_rad`(0.12rad)以上大きく開き直すまで閉じがブロックされ、
+  収録のテンポが崩れる。false ではトリップ後 **1.5 秒のクールダウン
+  (`gripper_overcurrent_cooldown_s`)+ 健全なステータス/電流**を条件に、
+  通常の開き操作だけでラッチが解除され把持に復帰できる。モータ側の
+  `limit_torque`/`limit_cur` ハード上限は常時残るため安全側は崩れない。
+- トリップ判定の確認サンプル数(トルク×3 / 電流×2)と `backoff_rad=0.05` は不変。
+- hard 閾値と motor 側上限のずれは意図的:
+  - トルク: hard 4.3 > limit_torque 4.0 — 上限で正常飽和しているだけの状態を
+    誤検出しない余裕。
+  - 電流: hard 7.5 < limit_cur 8.0 — **プラグインのガード(backoff+ラッチ)が
+    モータ側フォルトより先に働く**順序を保証する余裕(上記ロック事象の再発防止)。
 
 - **CAN 設定**: bitrate 1000000, `restart-ms 100`, `txqueuelen 1000`(can0_on.sh)。
 - **fps**: teleop 単体は 60、収録は `--dataset.fps=30`(カメラ 30fps に合わせる)。
 - **ヘッドレスでは `--display_data=false` 必須**(rerun のチャネル詰まりで
   収録ループがブロックする)。
+- **音声ガイド: `--play_sounds=true`**(2026-08-28 から採用、test070 収録で使用)。
+  lerobot の `log_say()` が `spd-say`(speech-dispatcher)で
+  「Recording episode N」「Reset the environment」等を読み上げる(USB スピーカー)。
+  画面を見ずにエピソードの**開始タイミングが掴めない問題を解消**した。
+  Jetson では `spd-say` が入っていることを確認(`speech-dispatcher` パッケージ)。
 - 収録前チェックリスト(スクリプトに組み込む): can0 operstate=up /
   `/dev/ttyUSB*` 存在 / (HSB カメラ併用時) mgbe0_0 carrier=1 / 二重起動なし。
 - get_observation() はフォロワーの実角度ではなく**最後に送った目標値**を

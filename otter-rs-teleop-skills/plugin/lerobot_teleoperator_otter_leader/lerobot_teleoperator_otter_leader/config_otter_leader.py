@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 from lerobot.teleoperators.config import TeleoperatorConfig
 
@@ -72,10 +72,15 @@ class OtterLeaderConfig(TeleoperatorConfig):
     drift_hold_motor_names: List[str] = field(
         default_factory=lambda: ["shoulder_yaw", "shoulder_pitch", "shoulder_roll"]
     )
-    # 保持電流 [mA] (XL330 の Goal_Current 単位 = 1mA)。20〜60mA で調整。
+    # 保持電流 [mA] (XL330 の Goal_Current 単位 = 1mA)。15〜60mA で調整。
     # 大きいほど強く戻るが、操作が重くなる。0 で無効。
     # 実機フィードバックで 40→25 に調整 (2026-08-16「もう少し弱く」)
     drift_hold_current_ma: int = 25
+    # 関節別の保持電流上書き (base 名 → mA)。未指定の関節は drift_hold_current_ma。
+    # 実機フィードバックで shoulder_roll のみ 25→18 に緩和 (2026-08-28)
+    drift_hold_current_overrides: Dict[str, int] = field(
+        default_factory=lambda: {"shoulder_roll": 18}
+    )
 
     # ---- グリッパ読み値の反転 ----
     # 再キャリブレーションやサーボ整備でグリッパの正規化方向が
